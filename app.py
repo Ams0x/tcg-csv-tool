@@ -4,19 +4,18 @@ import re
 import requests
 import json
 import time
-import os
+import base64
+import cloudscraper
 
-st.set_page_config(page_title="TCG CSV 智能混合處理工具", layout="wide")
-st.title("🧠 TCG Shopify CSV 智能混合擷取工具")
-st.write("✅ 支援所有日版/繁中版 PTCG 稀有度 (包含 CHR, CSR, SSR, K 等)")
+st.set_page_config(page_title="TCG CSV 終極視覺處理工具", layout="wide")
+st.title("👁️ TCG Shopify CSV 終極視覺處理工具 (突破防線版)")
+st.write("✅ 標題齊全 = 一秒極速處理 | ✅ 標題殘缺 = 自動突破防線下載圖片，強迫 AI 睇圖！")
 
-api_key = st.text_input("🔑 請輸入你的 Google Gemini API Key (用作處理殘缺標題):", type="password")
+api_key = st.text_input("🔑 請輸入你的 Google Gemini API Key (用作睇圖補底):", type="password")
 uploaded_file = st.file_uploader("📂 上傳從 Shopify 匯出的 CSV 檔案", type=["csv"])
 
 if uploaded_file:
-    # 🌟 自動獲取上傳檔案的名稱 🌟
     original_filename = uploaded_file.name
-    # 建立下載檔名，喺前面加個 Fixed_
     download_filename = f"Fixed_{original_filename}"
     
     df = pd.read_csv(uploaded_file)
@@ -38,8 +37,12 @@ if uploaded_file:
         
         all_rarities = ['SAR', 'SSR', 'CSR', 'CHR', 'RRR', 'ACE', 'SR', 'AR', 'UR', 'HR', 'RR', 'PR', 'TR', 'K', 'S', 'A', 'R', 'U', 'C']
         
+        # 🛠️ 建立突破防線嘅模擬瀏覽器 (扮成真人用 Chrome 睇網頁)
+        scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True})
+        
         for index, row in df.iterrows():
             title = str(row.get('Title', ''))
+            img_url = str(row.get('Image Src', ''))
             
             if pd.notna(title) and title != 'nan':
                 # --- 1. 擷取系列 ---
@@ -51,7 +54,7 @@ if uploaded_file:
                     if backup_match:
                         df.at[index, col_set] = backup_match.group(1)
 
-                # --- 2. 擷取稀有度 ---
+                # --- 2. 擷取稀有度 (有寫就秒速抽) ---
                 rarity_pattern = r'\s(' + '|'.join(all_rarities) + r')$'
                 rarity_match = re.search(rarity_pattern, title, re.IGNORECASE)
                 
@@ -64,15 +67,32 @@ if uploaded_file:
                 elif ' V ' in title or title.endswith('V'):
                     df.at[index, col_rarity] = 'RR'
                 else:
-                    # --- 3. AI 補底 ---
+                    # --- 3. 終極 AI 睇圖補底 (遇到標題無寫嘅卡) ---
                     if api_key:
-                        status_text.text(f"🔍 標題殘缺，正召喚 AI 分析: {title} ...")
+                        status_text.text(f"👁️ 標題無寫，正嘗試下載圖片畀 AI 分析: {title} ...")
                         try:
-                            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={api_key}"
                             rarity_str = ", ".join(all_rarities)
-                            text_prompt = f"You are a Pokemon TCG expert. What is the rarity of this Japanese/Traditional Chinese card based on its set and name: '{title}'? Return ONLY the rarity code from this list: [{rarity_str}]. No other text."
+                            text_prompt = f"You are a Pokemon TCG expert. Look at this card image and its name: '{title}'. Return ONLY the rarity code from this list: [{rarity_str}]. No other text. Check the bottom left or right corner of the card for the rarity symbol."
                             
                             payload = {"contents": [{"parts": [{"text": text_prompt}]}]}
+                            
+                            # 📸 嘗試下載圖片並轉換畀 AI 睇
+                            if pd.notna(img_url) and img_url.startswith('http'):
+                                try:
+                                    img_response = scraper.get(img_url, timeout=10)
+                                    if img_response.status_code == 200:
+                                        img_b64 = base64.b64encode(img_response.content).decode("utf-8")
+                                        payload["contents"][0]["parts"].append({
+                                            "inline_data": {
+                                                "mime_type": "image/jpeg",
+                                                "data": img_b64
+                                            }
+                                        })
+                                except Exception:
+                                    pass # 如果真係極端情況下死 Link，就跌返落純文字模式
+                            
+                            # 呼叫支援視覺嘅 gemini-1.5-flash 大腦
+                            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
                             headers = {"Content-Type": "application/json"}
                             
                             response = requests.post(url, json=payload, headers=headers)
@@ -87,7 +107,8 @@ if uploaded_file:
                                     df.at[index, col_rarity] = matched_rarity
                             else:
                                 df.at[index, col_rarity] = '需手動檢查'
-                            time.sleep(2)
+                                
+                            time.sleep(3) # 睇圖需時，俾 AI 抖 3 秒避免當機
                         except Exception as e:
                             df.at[index, col_rarity] = 'API錯誤'
                     else:
@@ -97,7 +118,6 @@ if uploaded_file:
             
         status_text.text("✅ 全部處理完成！")
         csv = df.to_csv(index=False).encode('utf-8-sig')
-        # 🌟 呢度會自動帶入上面定義好嘅 download_filename 🌟
         st.download_button(f"📥 下載 {download_filename}", csv, download_filename, "text/csv")
 
 elif uploaded_file and not api_key:
