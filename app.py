@@ -7,7 +7,7 @@ import time
 
 st.set_page_config(page_title="TCG CSV 智能混合處理工具", layout="wide")
 st.title("🧠 TCG Shopify CSV 智能混合擷取工具")
-st.write("✅ 標題齊全 = 一秒極速處理 | ✅ 標題殘缺 = 自動召喚 AI 補底估算")
+st.write("✅ 支援所有日版/繁中版 PTCG 稀有度 (包含 CHR, CSR, SSR, K 等)")
 
 api_key = st.text_input("🔑 請輸入你的 Google Gemini API Key (用作處理殘缺標題):", type="password")
 uploaded_file = st.file_uploader("📂 上傳從 Shopify 匯出的 CSV 檔案", type=["csv"])
@@ -30,11 +30,15 @@ if uploaded_file:
         progress_bar = st.progress(0)
         status_text = st.empty()
         
+        # 🌟 完整日版稀有度清單 (根據 TCGPlayer 標準) 🌟
+        # 必須將最長嘅字眼放前面 (例如 SAR 要喺 AR 前面)，避免程式判定錯誤
+        all_rarities = ['SAR', 'SSR', 'CSR', 'CHR', 'RRR', 'ACE', 'SR', 'AR', 'UR', 'HR', 'RR', 'PR', 'TR', 'K', 'S', 'A', 'R', 'U', 'C']
+        
         for index, row in df.iterrows():
             title = str(row.get('Title', ''))
             
             if pd.notna(title) and title != 'nan':
-                # --- 1. 擷取系列 (優先用文字擷取) ---
+                # --- 1. 擷取系列 ---
                 set_match = re.search(r'^(\[[A-Z0-9a-z]+\]\s[^\s]+)', title)
                 if set_match:
                     df.at[index, col_set] = set_match.group(1)
@@ -43,22 +47,28 @@ if uploaded_file:
                     if backup_match:
                         df.at[index, col_set] = backup_match.group(1)
 
-                # --- 2. 擷取稀有度 (優先用文字擷取) ---
-                rarity_match = re.search(r'\s(SAR|SR|AR|UR|HR|RRR|RR|R|U|C|SEC)$', title, re.IGNORECASE)
+                # --- 2. 擷取稀有度 (升級版 Regex，支援所有日版稀有度) ---
+                # 自動將 all_rarities 轉成 Regex 格式
+                rarity_pattern = r'\s(' + '|'.join(all_rarities) + r')$'
+                rarity_match = re.search(rarity_pattern, title, re.IGNORECASE)
+                
                 if rarity_match:
-                    # 情況 A：標題有寫，極速處理
                     df.at[index, col_rarity] = rarity_match.group(1).upper()
                 elif 'ex ' in title or title.endswith('ex'):
-                    # 情況 B：標題有 ex，自動判定為 RR
                     df.at[index, col_rarity] = 'RR'
+                elif ' VMAX ' in title or title.endswith('VMAX') or ' VSTAR ' in title or title.endswith('VSTAR'):
+                    df.at[index, col_rarity] = 'RRR' # 補充 VMAX/VSTAR 通常係 RRR
+                elif ' V ' in title or title.endswith('V'):
+                    df.at[index, col_rarity] = 'RR'  # 補充 V 通常係 RR
                 else:
-                    # 情況 C：⚠️ 標題殘缺！啟動 AI 補底！
+                    # --- 3. AI 補底 ---
                     if api_key:
-                        status_text.text(f"🔍 標題殘缺，正召喚 AI 分析第 {index+1} 張卡: {title} ...")
+                        status_text.text(f"🔍 標題殘缺，正召喚 AI 分析: {title} ...")
                         try:
-                            # 使用最穩定嘅 gemini-pro 模型
                             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={api_key}"
-                            text_prompt = f"You are a Pokemon TCG expert. What is the rarity of this card based on its set and name: '{title}'? Return ONLY the rarity code (e.g., C, U, R, RR, AR, SR, SAR, UR). No other text."
+                            rarity_str = ", ".join(all_rarities)
+                            text_prompt = f"You are a Pokemon TCG expert. What is the rarity of this Japanese/Traditional Chinese card based on its set and name: '{title}'? Return ONLY the rarity code from this list: [{rarity_str}]. No other text."
+                            
                             payload = {"contents": [{"parts": [{"text": text_prompt}]}]}
                             headers = {"Content-Type": "application/json"}
                             
@@ -67,18 +77,17 @@ if uploaded_file:
                             
                             if "candidates" in response_data:
                                 ai_rarity = response_data["candidates"][0]["content"]["parts"][0]["text"].strip().upper()
-                                # 簡單過濾，確保 AI 冇亂答一堆字
-                                valid_rarities = ['C', 'U', 'R', 'RR', 'AR', 'SR', 'SAR', 'UR', 'HR', 'SEC']
-                                if len(ai_rarity) <= 3 and any(r in ai_rarity for r in valid_rarities):
-                                    # 搵到對應稀有度
-                                    matched_rarity = next(r for r in valid_rarities if r in ai_rarity)
-                                    df.at[index, col_rarity] = matched_rarity
+                                # 檢查 AI 回覆係咪喺我哋張清單入面
+                                if any(r == ai_rarity for r in all_rarities):
+                                    df.at[index, col_rarity] = ai_rarity
                                 else:
-                                    df.at[index, col_rarity] = '需手動檢查'
+                                    # 嘗試喺 AI 回覆中抽字
+                                    matched_rarity = next((r for r in all_rarities if r in ai_rarity), '需手動檢查')
+                                    df.at[index, col_rarity] = matched_rarity
                             else:
                                 df.at[index, col_rarity] = '需手動檢查'
                                 
-                            time.sleep(2) # 俾 AI 抖 2 秒，避免被限速
+                            time.sleep(2)
                         except Exception as e:
                             df.at[index, col_rarity] = 'API錯誤'
                     else:
@@ -88,4 +97,4 @@ if uploaded_file:
             
         status_text.text("✅ 全部處理完成！")
         csv = df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 下載更新後的 CSV", csv, "Shopify_TCG_Smart_Updated.csv", "text/csv")
+        st.download_button("📥 下載更新後的 CSV", csv, "Shopify_TCG_Perfect_Updated.csv", "text/csv")
