@@ -4,13 +4,13 @@ import re
 
 st.set_page_config(page_title="TCG CSV 終極本機直讀版", layout="wide")
 st.title("🎯 TCG CSV 終極精準版 (本機秒速提取法)")
-st.write("✅ 已修復「閃色尋寶ex」系列名誤判 Bug | ✅ 自動處理「—」無印卡為 C")
+st.write("✅ 已修復「閃色尋寶ex」誤判 Bug | ✅ 無印卡會準確標示為「-」")
 
 col1, col2 = st.columns(2)
 
 with col1:
     st.markdown("### 📄 第一步：貼上卡表文字")
-    st.info("💡 將包含卡號及稀有度（如 C, U, R, S, SSR 或 —）的文字貼上。")
+    st.info("💡 將包含卡號及稀有度（如 C, U, R, S, SSR 或 -）的文字貼上。")
     pasted_data = st.text_area("在這裡貼上卡表：", height=250)
 
 with col2:
@@ -52,8 +52,8 @@ if st.button("🚀 開始 100% 精準匹配") and uploaded_csv and pasted_data:
             elif re.search(r'(Uncommon)', chunk_content, re.I): master_dict[card_num] = 'U'
             elif re.search(r'(Common)', chunk_content, re.I): master_dict[card_num] = 'C'
             elif re.search(r'(Shiny)', chunk_content, re.I): master_dict[card_num] = 'S'
-            # 3. 如果係 SV4a 嗰種 "—" 無印卡，自動當作普通卡 C
-            elif '—' in chunk_content: master_dict[card_num] = 'C'
+            # 3. 🎯 無印卡專屬處理：只要見到獨立一行係橫線 (長/短都得)，就設定為 "-"
+            elif re.search(r'^\s*[-—–]\s*$', chunk_content, re.MULTILINE): master_dict[card_num] = '-'
 
     if len(master_dict) == 0:
         st.error("❌ 找到卡號，但找不到稀有度。")
@@ -107,6 +107,6 @@ if st.button("🚀 開始 100% 精準匹配") and uploaded_csv and pasted_data:
 
         progress_bar.progress((index + 1) / len(df))
 
-    status_text.text("🎉 全部精準匹配完成！C/U/R 及無印卡完美還原！")
+    status_text.text("🎉 全部精準匹配完成！C/U/R 及無印卡 (-) 完美還原！")
     csv = df.to_csv(index=False).encode('utf-8-sig')
     st.download_button(f"📥 下載 {download_filename}", csv, download_filename, "text/csv")
