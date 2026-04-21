@@ -55,9 +55,9 @@ if uploaded_file and api_key:
                     prompt = f"""
                     你是一個 TCG (Pokemon/One Piece) 專家。請分析卡牌標題: "{title}" 和圖片。
                     找出該卡牌的：
-                    1. 系列代碼 (例如: SV4a, OP05, 151)
+                    1. 完整系列名稱，請嚴格按照這個格式輸出：「[系列代碼] 系列中文名稱」，例如: "[SV2P] 冰雪險境"。請直接從標題中提取正確的中文名稱和代碼來組合。
                     2. 稀有度 (例如: SAR, SR, AR, RR, R, U, C, SEC)
-                    請只回傳 JSON 格式，例如：{{"set": "SV4a", "rarity": "SAR"}}。不要其他文字。
+                    請只回傳 JSON 格式，例如：{{"set": "[SV2P] 冰雪險境", "rarity": "SAR"}}。不要其他文字。
                     """
                     
                     result = model.generate_content([prompt, img])
