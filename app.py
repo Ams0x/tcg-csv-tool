@@ -5,6 +5,7 @@ import PIL.Image
 import requests
 from io import BytesIO
 import json
+import time # 新增：用來計時排隊
 
 st.set_page_config(page_title="TCG CSV AI 助手", layout="wide")
 st.title("🃏 TCG Shopify CSV 自動補完工具")
@@ -18,10 +19,12 @@ if uploaded_file and api_key:
     
     df = pd.read_csv(uploaded_file)
     st.success(f"成功讀取！總共有 {len(df)} 件產品。")
+    st.info("💡 提示：因為免費 AI 每分鐘只能處理 15 張卡，程式會自動『每 4 秒處理一張』以防當機，請耐心等候。")
     
     if st.button("🚀 3️⃣ 開始自動睇圖加系列同稀有度"):
         progress_bar = st.progress(0)
         status_text = st.empty()
+        error_log = st.empty()
         
         col_set = '系列 (product.metafields.custom.set)'
         col_rarity = '稀有度 (product.metafields.custom.rarity)'
@@ -37,54 +40,32 @@ if uploaded_file and api_key:
             title = str(row.get('Title', ''))
             img_url = str(row.get('Image Src', ''))
             
-            status_text.text(f"處理緊第 {index+1} 張卡: {title}")
+            status_text.text(f"處理緊第 {index+1}/{len(df)} 張卡: {title} (處理中，請勿關閉網頁...)")
             
             if pd.notna(title) and title != 'nan':
-                # 準備傳送畀 AI 嘅資料
-                contents = []
-                
                 try:
-                    # 嘗試下載圖片
-                    headers = {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
-                        'Referer': 'https://asia.pokemon-card.com/'
-                    }
-                    response = requests.get(img_url, headers=headers, timeout=5)
-                    response.raise_for_status() 
-                    img = PIL.Image.open(BytesIO(response.content))
-                    
-                    prompt = f"""
-                    你是一個 TCG (Pokemon/One Piece) 專家。請分析卡牌標題: "{title}" 和圖片。
-                    找出該卡牌的：
-                    1. 完整系列名稱，嚴格按照格式「[系列代碼] 系列中文名稱」，例如: "[SV2P] 冰雪險境"。
-                    2. 稀有度 (例如: SAR, SR, AR, RR, R, U, C, SEC)
-                    請只回傳 JSON 格式，例如：{{"set": "[SV2P] 冰雪險境", "rarity": "SAR"}}。不要其他文字。
-                    """
-                    contents = [prompt, img]
-                    
-                except Exception:
-                    # 🚨 圖片下載失敗 (被 Block)，啟動盲測模式！
                     text_prompt = f"""
-                    你是一個 TCG 專家。由於圖片無法讀取，請純粹根據卡牌標題: "{title}" 進行分析。
+                    你是一個 TCG 專家。請純粹根據卡牌標題: "{title}" 進行分析。
                     找出該卡牌的：
                     1. 完整系列名稱，嚴格按照格式「[系列代碼] 系列中文名稱」，例如: "[SV2P] 冰雪險境"。
-                    2. 稀有度 (例如: SAR, SR, AR, RR, R, U, C, SEC)。如果標題沒寫，請憑藉你對 Pokemon TCG 的專業知識，推斷這張卡（編號）的稀有度。
+                    2. 稀有度 (例如: SAR, SR, AR, RR, R, U, C, SEC)。如果標題沒寫，請憑藉你對 Pokemon TCG 的專業知識，推斷這張卡的稀有度。
                     請只回傳 JSON 格式，例如：{{"set": "[SV2P] 冰雪險境", "rarity": "C"}}。不要其他文字。
                     """
-                    contents = [text_prompt]
-
-                # 叫 AI 開始做嘢
-                try:
-                    result = model.generate_content(contents)
+                    
+                    # 使用純文字模式以加快速度及減少出錯
+                    result = model.generate_content(text_prompt)
                     cleaned_text = result.text.strip().replace('```json', '').replace('```', '')
                     ai_data = json.loads(cleaned_text)
                     
                     df.at[index, col_set] = ai_data.get('set', '')
                     df.at[index, col_rarity] = ai_data.get('rarity', '')
                 except Exception as ai_e:
-                    pass # 如果 AI 解析出錯，保留空白
+                    error_log.warning(f"第 {index+1} 行出錯 ({title})，已略過。原因: {ai_e}")
                     
             progress_bar.progress((index + 1) / len(df))
+            
+            # 🌟 最重要嘅一步：強迫程式抖 4 秒，避開免費限速！
+            time.sleep(4) 
             
         status_text.text("✅ 全部處理完成！")
         csv = df.to_csv(index=False).encode('utf-8-sig')
