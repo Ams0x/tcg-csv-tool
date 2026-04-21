@@ -22,9 +22,7 @@ if uploaded_file and api_key:
     if st.button("🚀 3️⃣ 開始自動睇圖加系列同稀有度"):
         progress_bar = st.progress(0)
         status_text = st.empty()
-        error_log = st.empty()
         
-        # 🌟 根據你嘅要求，更新咗呢兩個欄位名稱 🌟
         col_set = '系列 (product.metafields.custom.set)'
         col_rarity = '稀有度 (product.metafields.custom.rarity)'
         
@@ -41,35 +39,50 @@ if uploaded_file and api_key:
             
             status_text.text(f"處理緊第 {index+1} 張卡: {title}")
             
-            if pd.notna(img_url) and img_url.startswith('http'):
+            if pd.notna(title) and title != 'nan':
+                # 準備傳送畀 AI 嘅資料
+                contents = []
+                
                 try:
-                    # 加入 User-Agent 扮成 Chrome 瀏覽器，防止被 Pokémon 官網 Block
+                    # 嘗試下載圖片
                     headers = {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+                        'Referer': 'https://asia.pokemon-card.com/'
                     }
-                    response = requests.get(img_url, headers=headers, timeout=10)
+                    response = requests.get(img_url, headers=headers, timeout=5)
                     response.raise_for_status() 
-                    
                     img = PIL.Image.open(BytesIO(response.content))
                     
                     prompt = f"""
                     你是一個 TCG (Pokemon/One Piece) 專家。請分析卡牌標題: "{title}" 和圖片。
                     找出該卡牌的：
-                    1. 完整系列名稱，請嚴格按照這個格式輸出：「[系列代碼] 系列中文名稱」，例如: "[SV2P] 冰雪險境"。請直接從標題中提取正確的中文名稱和代碼來組合。
+                    1. 完整系列名稱，嚴格按照格式「[系列代碼] 系列中文名稱」，例如: "[SV2P] 冰雪險境"。
                     2. 稀有度 (例如: SAR, SR, AR, RR, R, U, C, SEC)
                     請只回傳 JSON 格式，例如：{{"set": "[SV2P] 冰雪險境", "rarity": "SAR"}}。不要其他文字。
                     """
+                    contents = [prompt, img]
                     
-                    result = model.generate_content([prompt, img])
+                except Exception:
+                    # 🚨 圖片下載失敗 (被 Block)，啟動盲測模式！
+                    text_prompt = f"""
+                    你是一個 TCG 專家。由於圖片無法讀取，請純粹根據卡牌標題: "{title}" 進行分析。
+                    找出該卡牌的：
+                    1. 完整系列名稱，嚴格按照格式「[系列代碼] 系列中文名稱」，例如: "[SV2P] 冰雪險境"。
+                    2. 稀有度 (例如: SAR, SR, AR, RR, R, U, C, SEC)。如果標題沒寫，請憑藉你對 Pokemon TCG 的專業知識，推斷這張卡（編號）的稀有度。
+                    請只回傳 JSON 格式，例如：{{"set": "[SV2P] 冰雪險境", "rarity": "C"}}。不要其他文字。
+                    """
+                    contents = [text_prompt]
+
+                # 叫 AI 開始做嘢
+                try:
+                    result = model.generate_content(contents)
                     cleaned_text = result.text.strip().replace('```json', '').replace('```', '')
                     ai_data = json.loads(cleaned_text)
                     
-                    # 填入你指定嘅欄位
                     df.at[index, col_set] = ai_data.get('set', '')
                     df.at[index, col_rarity] = ai_data.get('rarity', '')
-                    
-                except Exception as e:
-                    error_log.warning(f"跳過咗第 {index+1} 行 ({title}) - 原因: {str(e)[:50]}...")
+                except Exception as ai_e:
+                    pass # 如果 AI 解析出錯，保留空白
                     
             progress_bar.progress((index + 1) / len(df))
             
