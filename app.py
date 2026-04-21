@@ -15,7 +15,7 @@ uploaded_file = st.file_uploader("2️⃣ 上傳從 Shopify 匯出的 CSV 檔案
 
 if uploaded_file and api_key:
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-1.5-flash-latest')
     
     df = pd.read_csv(uploaded_file)
     st.success(f"成功讀取！總共有 {len(df)} 件產品。")
