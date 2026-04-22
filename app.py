@@ -3,8 +3,8 @@ import pandas as pd
 import re
 
 st.set_page_config(page_title="TCG CSV 終極本機直讀版", layout="wide")
-st.title("🎯 TCG CSV 終極精準版 (本機秒速提取法)")
-st.write("✅ 已修復「閃色尋寶ex」誤判 Bug | ✅ 無印卡會準確標示為「-」")
+st.title("🎯 TCG CSV 終極精準版 (支援中日雙語及統一排版)")
+st.write("✅ 自動將日文 [系列名] 代號 反轉為 [代號] 系列名 | ✅ 無印卡準確標示為「-」")
 
 col1, col2 = st.columns(2)
 
@@ -52,7 +52,7 @@ if st.button("🚀 開始 100% 精準匹配") and uploaded_csv and pasted_data:
             elif re.search(r'(Uncommon)', chunk_content, re.I): master_dict[card_num] = 'U'
             elif re.search(r'(Common)', chunk_content, re.I): master_dict[card_num] = 'C'
             elif re.search(r'(Shiny)', chunk_content, re.I): master_dict[card_num] = 'S'
-            # 3. 🎯 無印卡專屬處理：只要見到獨立一行係橫線 (長/短都得)，就設定為 "-"
+            # 3. 無印卡專屬處理
             elif re.search(r'^\s*[-—–]\s*$', chunk_content, re.MULTILINE): master_dict[card_num] = '-'
 
     if len(master_dict) == 0:
@@ -78,26 +78,34 @@ if st.button("🚀 開始 100% 精準匹配") and uploaded_csv and pasted_data:
     for index, row in df.iterrows():
         title = str(row.get('Title', ''))
         if pd.notna(title) and title != 'nan':
-            # 擷取系列
-            set_match = re.search(r'^(\[[A-Z0-9a-z]+\]\s[^\s]+)', title)
-            if set_match: df.at[index, col_set] = set_match.group(1)
+            # 🌟 升級版擷取系列 (支援中日文，並統一排版)
+            set_match = re.search(r'^(.*?)\s+\d{3}/\d{3}', title)
+            if set_match: 
+                raw_series = set_match.group(1).strip()
+                # 🎯 核心動作：自動修正日文排版 [系列名] 英文代號 -> [英文代號] 系列名
+                flip_match = re.search(r'^\[(.*?)\]\s*([A-Za-z0-9]+)$', raw_series)
+                if flip_match:
+                    df.at[index, col_set] = f"[{flip_match.group(2).upper()}] {flip_match.group(1)}"
+                else:
+                    df.at[index, col_set] = raw_series
+            else:
+                # 備用方案
+                backup_match = re.search(r'^(\[.*?\]\s*[^\s]+)', title)
+                if backup_match: df.at[index, col_set] = backup_match.group(1).strip()
 
             # 擷取卡號並查字典
             num_match = re.search(r'(\d{3})/\d{3}', title)
             if num_match:
                 card_num = num_match.group(1)
                 
-                # 🎯 核心：直接用字典配對！
                 if card_num in master_dict:
                     df.at[index, col_rarity] = master_dict[card_num]
                 else:
-                    # 💡 終極防護：切除系列名 (如 閃色尋寶ex)，只用精靈名嚟做判斷
-                    pokemon_name = re.sub(r'^\[.*?\]\s*[^\s]+\s*\d{3}/\d{3}\s*', '', title)
-                    
+                    pokemon_name = re.sub(r'^(.*?)\s+\d{3}/\d{3}\s*', '', title)
                     rarity_match = re.search(r'\s(' + '|'.join(all_rarities) + r')$', title, re.IGNORECASE)
+                    
                     if rarity_match: 
                         df.at[index, col_rarity] = rarity_match.group(1).upper()
-                    # 淨係檢查 pokemon_name 有無 ex，避免被系列名連累
                     elif 'ex ' in pokemon_name.lower() or pokemon_name.lower().endswith('ex'): 
                         df.at[index, col_rarity] = 'RR'
                     else: 
@@ -107,6 +115,6 @@ if st.button("🚀 開始 100% 精準匹配") and uploaded_csv and pasted_data:
 
         progress_bar.progress((index + 1) / len(df))
 
-    status_text.text("🎉 全部精準匹配完成！C/U/R 及無印卡 (-) 完美還原！")
+    status_text.text("🎉 全部精準匹配完成！排版完美統一為 [代號] 系列名！")
     csv = df.to_csv(index=False).encode('utf-8-sig')
     st.download_button(f"📥 下載 {download_filename}", csv, download_filename, "text/csv")
