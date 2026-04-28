@@ -4,7 +4,7 @@ import re
 
 st.set_page_config(page_title="TCG CSV 終極本機直讀版", layout="wide")
 st.title("🎯 TCG CSV 終極精準版 (支援中日雙語及統一排版)")
-st.write("✅ 自動將日文 [系列名] 代號 反轉為 [代號] 系列名 | ✅ 無印卡準確標示為「-」")
+st.write("✅ 自動將「系列名」代號 反轉為 [代號] 系列名 | ✅ 支援各種日文括號「」『』")
 
 col1, col2 = st.columns(2)
 
@@ -82,15 +82,24 @@ if st.button("🚀 開始 100% 精準匹配") and uploaded_csv and pasted_data:
             set_match = re.search(r'^(.*?)\s+\d{3}/\d{3}', title)
             if set_match: 
                 raw_series = set_match.group(1).strip()
-                # 🎯 核心動作：自動修正日文排版 [系列名] 英文代號 -> [英文代號] 系列名
-                flip_match = re.search(r'^\[(.*?)\]\s*([A-Za-z0-9]+)$', raw_series)
+                
+                # 🎯 核心動作：自動修正日文排版
+                # 支援中括號 [ ]、日文括號 「 」、『 』，甚至處理打錯字變成 " 的情況
+                flip_match = re.search(r'^[\[「『](.*?)[\]」』"]\s*([A-Za-z0-9]+)$', raw_series)
+                
                 if flip_match:
-                    df.at[index, col_set] = f"[{flip_match.group(2).upper()}] {flip_match.group(1)}"
+                    # 如果係 「系列名」代號 -> 變成 [代號] 系列名
+                    df.at[index, col_set] = f"[{flip_match.group(2).upper()}] {flip_match.group(1).strip()}"
                 else:
-                    df.at[index, col_set] = raw_series
+                    # 💡 備用方案：如果有人打轉咗，變成 代號「系列名」，都識得反轉！
+                    reverse_match = re.search(r'^([A-Za-z0-9]+)\s*[\[「『](.*?)[\]」』"]$', raw_series)
+                    if reverse_match:
+                        df.at[index, col_set] = f"[{reverse_match.group(1).upper()}] {reverse_match.group(2).strip()}"
+                    else:
+                        df.at[index, col_set] = raw_series
             else:
-                # 備用方案
-                backup_match = re.search(r'^(\[.*?\]\s*[^\s]+)', title)
+                # 標題冇卡牌編號嘅備用方案
+                backup_match = re.search(r'^([\[「『].*?[\]」』"]\s*[^\s]+)', title)
                 if backup_match: df.at[index, col_set] = backup_match.group(1).strip()
 
             # 擷取卡號並查字典
@@ -115,6 +124,6 @@ if st.button("🚀 開始 100% 精準匹配") and uploaded_csv and pasted_data:
 
         progress_bar.progress((index + 1) / len(df))
 
-    status_text.text("🎉 全部精準匹配完成！排版完美統一為 [代號] 系列名！")
+    status_text.text("🎉 全部精準匹配完成！排版已完美統一為 [代號] 系列名！")
     csv = df.to_csv(index=False).encode('utf-8-sig')
     st.download_button(f"📥 下載 {download_filename}", csv, download_filename, "text/csv")
